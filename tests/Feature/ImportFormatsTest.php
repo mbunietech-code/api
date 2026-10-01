@@ -174,4 +174,39 @@ class ImportFormatsTest extends TestCase
         $this->assertSame(3, Teacher::count());
         $this->assertSame(10000, (int) Contribution::where('teacher_id', $willy->id)->sum('amount'));
     }
+
+    public function test_teacher_list_creates_and_updates_teachers(): void
+    {
+        $existing = Teacher::create(['full_name' => 'ALICIA JOACHIM KIMATI', 'number' => 2]);
+
+        $preview = $this->preview($this->file(['Walimu' => [
+            ['ORODHA YA WALIMU 2026'],
+            ['S/N', 'Jina Kamili', 'Namba ya Simu', 'Barua Pepe', 'Maelezo'],
+            [1, 'Alicia Joachim Kimati', '0712 345 678', 'alicia@test.local', null],
+            [2, 'Omega Paulo', '0755000111', 'si-email', 'Mpya'],
+            [3, 'OMEGA PAULO', null, null, null],
+        ]]), ['kind' => 'teachers'])->assertOk()
+            ->assertJsonPath('kind', 'teachers')
+            ->assertJsonPath('layout', 'teachers')
+            ->assertJsonPath('header_row', 2)
+            ->assertJsonPath('mapping.columns.B', 'name')
+            ->assertJsonPath('mapping.columns.C', 'phone')
+            ->assertJsonPath('mapping.columns.D', 'email')
+            ->assertJsonPath('teachers_count', 2)
+            ->assertJsonPath('new_teachers', 1)
+            ->assertJsonPath('updated_teachers', 1)
+            ->assertJsonPath('rows.0.match.type', 'exact')
+            ->assertJsonPath('rows.0.changes', ['phone', 'email', 'number'])
+            ->assertJsonPath('rows.1.email', null)
+            ->assertJsonCount(2, 'errors')
+            ->json();
+
+        $this->postJson('/api/import/teachers/commit', ['rows' => $preview['rows']])->assertOk()
+            ->assertJsonPath('teachers_created', 1)
+            ->assertJsonPath('teachers_updated', 1);
+
+        $this->assertSame('0712 345 678', $existing->fresh()->phone);
+        $this->assertSame(1, $existing->fresh()->number);
+        $this->assertSame('0755000111', Teacher::firstWhere('name_key', 'OMEGA PAULO')->phone);
+    }
 }

@@ -32,6 +32,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/import/preview', [ImportController::class, 'preview']);
     Route::post('/import/commit', [ImportController::class, 'commit']);
+    Route::post('/import/teachers/commit', [ImportController::class, 'commitTeachers']);
 
     Route::get('/settings', [SettingsController::class, 'show']);
     Route::put('/settings', [SettingsController::class, 'update']);

@@ -48,8 +48,9 @@ class ExcelImporter
     /**
      * @param  array|null  $mapping  {layout, header_row, columns: {"A": role, ...}} from a previous preview
      */
-    public function parse(string $path, ?int $year = null, ?array $mapping = null, ?string $sheet = null, ?string $fileName = null): array
+    public function parse(string $path, ?int $year = null, ?array $mapping = null, ?string $sheet = null, ?string $fileName = null, string $kind = 'contributions'): array
     {
+        $teachersOnly = $kind === 'teachers';
         $tables = $this->load($path);
         $sheets = array_keys($tables);
         if ($sheet !== null && ! isset($tables[$sheet])) {
@@ -58,12 +59,12 @@ class ExcelImporter
 
         if ($mapping) {
             $sheet ??= $sheets[0];
-            $map = $this->normalizeMapping($mapping, $tables[$sheet]);
+            $map = $this->normalizeMapping($mapping, $tables[$sheet], $teachersOnly);
             $map['auto'] = false;
         } else {
             $best = null;
             foreach ($sheet !== null ? [$sheet] : $sheets as $name) {
-                $candidate = $this->detect($tables[$name]);
+                $candidate = $this->detect($tables[$name], $teachersOnly);
                 if ($best === null || $candidate['score'] > $best[1]['score']) {
                     $best = [$name, $candidate];
                 }
@@ -84,7 +85,20 @@ class ExcelImporter
             'mapping' => $this->publicMapping($map),
             'columns' => $this->describeColumns($table, $map),
             'auto_detected' => $map['auto'],
+            'kind' => $kind,
         ];
+
+        if ($teachersOnly) {
+            if (! in_array('name', $map['columns'], true)) {
+                return $base + $this->emptyResult('Chagua safu yenye majina ya walimu ili kuendelea.');
+            }
+            [$rows, $errors] = $this->readTeachers($table, $map);
+            if (! $rows) {
+                return $base + $this->emptyResult('Hakuna majina ya walimu yaliyopatikana. Kagua safu ya kichwa na safu ya majina.');
+            }
+
+            return $base + $this->annotateTeachers($rows, $errors) + ['needs_mapping' => false, 'message' => null];
+        }
 
         if (! $this->usable($map)) {
             return $base + $this->emptyResult($map['layout'] === 'long'
@@ -199,7 +213,7 @@ class ExcelImporter
         return null;
     }
 
-    private function detect(array $table): array
+    private function detect(array $table, bool $teachersOnly = false): array
     {
         $best = ['score' => 0, 'layout' => 'wide', 'header_row' => 0, 'columns' => []];
 
@@ -214,6 +228,20 @@ class ExcelImporter
                     $roles[$c] = $role;
                 }
             }
+            if ($teachersOnly) {
+                // Teacher lists only need a name column; contact columns raise confidence.
+                $roles = array_filter($roles, fn ($x) => in_array($x, ['name', 'number', 'phone', 'email', 'notes'], true));
+                if (! in_array('name', $roles, true)) {
+                    continue;
+                }
+                $score = 25 + 5 * (count($roles) - 1);
+                if ($score > $best['score']) {
+                    $best = ['score' => $score, 'layout' => 'teachers', 'header_row' => $r + 1, 'columns' => $roles];
+                }
+
+                continue;
+            }
+
             $months = count(array_unique(array_filter($roles, fn ($x) => str_starts_with($x, 'month:'))));
             $hasAmount = in_array('amount', $roles, true);
             $hasWhen = in_array('month', $roles, true) || in_array('date', $roles, true);
@@ -241,6 +269,9 @@ class ExcelImporter
         }
 
         if ($best['score'] === 0) {
+            if ($teachersOnly) {
+                $best['layout'] = 'teachers';
+            }
             // No header at all: at least propose the column that looks like names.
             $guess = $this->guessNameColumn($table, 0, []);
             $best['columns'] = $guess === null ? [] : [$guess => 'name'];
@@ -280,9 +311,9 @@ class ExcelImporter
         return $best;
     }
 
-    private function normalizeMapping(array $input, array $table): array
+    private function normalizeMapping(array $input, array $table, bool $teachersOnly = false): array
     {
-        $layout = ($input['layout'] ?? 'wide') === 'long' ? 'long' : 'wide';
+        $layout = $teachersOnly ? 'teachers' : (($input['layout'] ?? 'wide') === 'long' ? 'long' : 'wide');
         $header = max(0, (int) ($input['header_row'] ?? 0));
         $columns = [];
         foreach ((array) ($input['columns'] ?? []) as $letter => $role) {
@@ -675,6 +706,177 @@ class ExcelImporter
             'errors' => [],
             'duplicates' => [],
         ];
+    }
+
+    // ------------------------------------------------- teachers only
+
+    /** Rows of a teacher list: name plus optional No., phone, email, notes. */
+    private function readTeachers(array $table, array $map): array
+    {
+        $col = fn (string $role) => array_search($role, $map['columns'], true);
+        $nameCol = $col('name');
+        $rows = [];
+        $errors = [];
+        $byKey = [];
+
+        foreach (array_slice($table['raw'], $map['header_row'], null, true) as $i => $raw) {
+            $text = $table['text'][$i];
+            $excelRow = $i + 1;
+            $name = Teacher::cleanName((string) ($text[$nameCol] ?? ''));
+            if ($name === '' || $this->isTotalRow($name)) {
+                continue;
+            }
+            $key = Teacher::keyFor($name);
+            if (isset($byKey[$key])) {
+                $errors[] = ['row' => $excelRow, 'name' => $name, 'message' => 'Jina limejirudia (safu '.$rows[$byKey[$key]]['row'].'); safu hii imerukwa.'];
+
+                continue;
+            }
+
+            $phone = ($pc = $col('phone')) !== false ? (self::str($text[$pc] ?? '') ?: null) : null;
+            $email = ($ec = $col('email')) !== false ? (self::str($text[$ec] ?? '') ?: null) : null;
+            $issues = [];
+            if ($phone !== null && ! preg_match('/^[0-9+ ()\-]{9,20}$/', $phone)) {
+                $issues[] = 'Namba ya simu "'.$phone.'" si sahihi; haitahifadhiwa.';
+                $phone = null;
+            }
+            if ($email !== null && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $issues[] = 'Barua pepe "'.$email.'" si sahihi; haitahifadhiwa.';
+                $email = null;
+            }
+
+            $byKey[$key] = count($rows);
+            $rows[] = [
+                'row' => $excelRow,
+                'number' => ($nc = $col('number')) !== false && is_numeric($raw[$nc] ?? null) ? (int) $raw[$nc] : null,
+                'name' => $name,
+                'phone' => $phone,
+                'email' => $email,
+                'notes' => ($oc = $col('notes')) !== false ? (self::str($text[$oc] ?? '') ?: null) : null,
+                'issues' => $issues,
+            ];
+            foreach ($issues as $issue) {
+                $errors[] = ['row' => $excelRow, 'name' => $name, 'message' => $issue];
+            }
+        }
+
+        return [$rows, $errors];
+    }
+
+    private function annotateTeachers(array $rows, array $errors): array
+    {
+        $teachers = Teacher::query()->get(['id', 'full_name', 'name_key', 'phone', 'email', 'number']);
+        $byKey = $teachers->keyBy('name_key');
+        $byTokens = $teachers->keyBy(fn ($t) => self::tokenKey($t->name_key));
+
+        foreach ($rows as &$row) {
+            $key = Teacher::keyFor($row['name']);
+            $match = ['type' => 'new', 'teacher_id' => null, 'teacher_name' => null, 'score' => 0];
+            if ($t = $byKey->get($key)) {
+                $match = ['type' => 'exact', 'teacher_id' => $t->id, 'teacher_name' => $t->full_name, 'score' => 100];
+            } elseif ($t = $byTokens->get(self::tokenKey($key))) {
+                $match = ['type' => 'reordered', 'teacher_id' => $t->id, 'teacher_name' => $t->full_name, 'score' => 99];
+            } else {
+                $best = null;
+                $bestScore = 0;
+                foreach ($teachers as $t) {
+                    $sc = self::similarity($key, $t->name_key);
+                    if ($sc > $bestScore) {
+                        [$best, $bestScore] = [$t, $sc];
+                    }
+                }
+                if ($best && $bestScore >= 80) {
+                    $match = ['type' => 'suggested', 'teacher_id' => $best->id, 'teacher_name' => $best->full_name, 'score' => $bestScore];
+                }
+            }
+
+            $row['match'] = $match;
+            $row['action'] = match ($match['type']) {
+                'exact', 'reordered' => 'existing',
+                'suggested' => $match['score'] >= 90 ? 'existing' : 'new',
+                default => 'new',
+            };
+            $row['teacher_id'] = $row['action'] === 'existing' ? $match['teacher_id'] : null;
+            $row['is_new'] = $row['action'] === 'new';
+
+            // What an update of an existing teacher would change.
+            $row['changes'] = [];
+            if ($row['teacher_id'] && ($t = $teachers->firstWhere('id', $row['teacher_id']))) {
+                foreach (['phone', 'email', 'number'] as $field) {
+                    if ($row[$field] !== null && (string) $row[$field] !== (string) $t->{$field}) {
+                        $row['changes'][] = $field;
+                    }
+                }
+            }
+            // Same shape as contribution rows so clients can share one model.
+            $row['months'] = array_fill(0, 12, 0);
+            $row['paid_dates'] = array_fill(0, 12, null);
+            $row['total'] = 0;
+            $row['excel_total'] = null;
+            $row['duplicate_months'] = [];
+        }
+        unset($row);
+
+        return [
+            'teachers_count' => count($rows),
+            'new_teachers' => count(array_filter($rows, fn ($r) => $r['action'] === 'new')),
+            'updated_teachers' => count(array_filter($rows, fn ($r) => $r['action'] === 'existing' && $r['changes'])),
+            'suggestions' => count(array_filter($rows, fn ($r) => $r['match']['type'] === 'suggested')),
+            'records_count' => 0,
+            'total_amount' => 0,
+            'rows' => $rows,
+            'errors' => $errors,
+            'duplicates' => [],
+        ];
+    }
+
+    /** Creates new teachers and updates contact details of existing ones. */
+    public function commitTeachers(array $rows): array
+    {
+        $stats = ['teachers_created' => 0, 'teachers_updated' => 0, 'teachers_unchanged' => 0, 'rows_skipped' => 0];
+
+        DB::transaction(function () use ($rows, &$stats) {
+            foreach ($rows as $row) {
+                $action = $row['action'] ?? (! empty($row['teacher_id']) ? 'existing' : 'new');
+                if ($action === 'skip') {
+                    $stats['rows_skipped']++;
+
+                    continue;
+                }
+                $name = Teacher::cleanName($row['name']);
+                $teacher = $action === 'existing' && ! empty($row['teacher_id']) ? Teacher::withTrashed()->find($row['teacher_id']) : null;
+                $teacher ??= Teacher::withTrashed()->firstWhere('name_key', Teacher::keyFor($name));
+
+                $values = array_filter([
+                    'phone' => $row['phone'] ?? null,
+                    'email' => $row['email'] ?? null,
+                    'number' => $row['number'] ?? null,
+                    'notes' => $row['notes'] ?? null,
+                ], fn ($v) => $v !== null && $v !== '');
+
+                if (! $teacher) {
+                    Teacher::create($values + [
+                        'full_name' => $name,
+                        'number' => $values['number'] ?? ((int) Teacher::withTrashed()->max('number') + 1),
+                    ]);
+                    $stats['teachers_created']++;
+
+                    continue;
+                }
+                if ($teacher->trashed()) {
+                    $teacher->restore();
+                }
+                $teacher->fill($values);
+                if ($teacher->isDirty()) {
+                    $teacher->save();
+                    $stats['teachers_updated']++;
+                } else {
+                    $stats['teachers_unchanged']++;
+                }
+            }
+        });
+
+        return $stats;
     }
 
     // ----------------------------------------------------------- commit

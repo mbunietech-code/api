@@ -23,6 +23,7 @@ class ImportController extends Controller
             'year' => ['nullable', 'integer', 'between:2000,2100'],
             'sheet' => ['nullable', 'string', 'max:100'],
             'mapping' => ['nullable', 'json'],
+            'kind' => ['nullable', 'in:contributions,teachers'],
         ], [
             'file.required' => 'Chagua faili la Excel.',
             'file.extensions' => 'Faili lazima liwe la aina ya .xlsx, .xls, .csv au .ods.',
@@ -38,6 +39,7 @@ class ImportController extends Controller
                 is_array($mapping) ? $mapping : null,
                 $request->filled('sheet') ? $request->input('sheet') : null,
                 $file->getClientOriginalName(),
+                $request->input('kind', 'contributions'),
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -71,5 +73,22 @@ class ImportController extends Controller
         $stats = $this->importer->commit($data['rows'], $data['year'], $data['duplicate_mode'], $request->user()->id);
 
         return ['message' => 'Data imeingizwa kikamilifu.'] + $stats;
+    }
+
+    /** Teacher list import: creates new teachers, updates contacts of existing ones. */
+    public function commitTeachers(Request $request)
+    {
+        $data = $request->validate([
+            'rows' => ['required', 'array', 'min:1'],
+            'rows.*.name' => ['required', 'string', 'max:150'],
+            'rows.*.number' => ['nullable', 'integer'],
+            'rows.*.phone' => ['nullable', 'string', 'max:30'],
+            'rows.*.email' => ['nullable', 'email', 'max:150'],
+            'rows.*.notes' => ['nullable', 'string', 'max:1000'],
+            'rows.*.teacher_id' => ['nullable', 'integer'],
+            'rows.*.action' => ['nullable', 'in:existing,new,skip'],
+        ]);
+
+        return ['message' => 'Walimu wameingizwa kikamilifu.'] + $this->importer->commitTeachers($data['rows']);
     }
 }
