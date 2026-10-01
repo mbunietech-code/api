@@ -45,28 +45,45 @@ class ApiLanguage
         $response = $next($request);
 
         if ($english && $response instanceof JsonResponse) {
-            $data = $response->getData(true);
-            if (is_array($data)) {
-                $response->setData($this->walk($data, false));
+            // Decode to objects (not arrays) so empty JSON objects stay {} —
+            // the app expects e.g. "remap": {} and breaks on "remap": [].
+            $data = $response->getData(false);
+            $changed = false;
+            $translated = $this->walk($data, false, $changed);
+            if ($changed) {
+                $response->setData($translated);
             }
         }
 
         return $response;
     }
 
-    /** Translates strings under message / errors / issues keys. */
-    private function walk(array $data, bool $inside): array
+    /** Translates strings under message / errors / issues keys, keeping objects as objects. */
+    private function walk(mixed $value, bool $inside, bool &$changed, int|string|null $key = null): mixed
     {
-        foreach ($data as $key => $value) {
+        if (is_object($value) || is_array($value)) {
             $here = $inside || in_array($key, ['message', 'errors', 'issues'], true);
-            if (is_array($value)) {
-                $data[$key] = $this->walk($value, $here || $key === 'errors' || $key === 'issues');
-            } elseif (is_string($value) && ($here || $key === 'message')) {
-                $data[$key] = self::english($value);
+            foreach ($value as $k => $v) {
+                $new = $this->walk($v, $here, $changed, $k);
+                if (is_object($value)) {
+                    $value->{$k} = $new;
+                } else {
+                    $value[$k] = $new;
+                }
             }
+
+            return $value;
+        }
+        if (is_string($value) && ($inside || $key === 'message')) {
+            $english = self::english($value);
+            if ($english !== $value) {
+                $changed = true;
+            }
+
+            return $english;
         }
 
-        return $data;
+        return $value;
     }
 
     public static function english(string $sw): string
