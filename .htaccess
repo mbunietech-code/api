@@ -1,0 +1,17 @@
+# Shared hosting where the domain's web root is this project folder (not public/).
+# Sends every request into public/ so https://api.umojagroup.co.tz/api/... works and the
+# source files (vendor/, .env, artisan, routes/ ...) can never be downloaded.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block dotfiles such as .env and .git everywhere.
+    RewriteRule (^|/)\. - [F,L]
+
+    # Old links that already include /public keep working.
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
