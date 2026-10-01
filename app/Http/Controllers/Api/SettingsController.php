@@ -58,6 +58,10 @@ class SettingsController extends Controller
             return response()->json(['message' => 'Imeshindikana: '.$e->getMessage()], 422);
         }
 
+        if ($reason = ContributionNotifier::testModeReason($data['channel'], $sms)) {
+            return response()->json(['message' => $reason], 422);
+        }
+
         return ['message' => 'Ujumbe wa majaribio umetumwa.'];
     }
 

@@ -72,6 +72,11 @@ class ContributionNotifier
         } else {
             try {
                 $deliver();
+                // The log/array drivers only write to storage/logs: nothing reaches the teacher.
+                if ($testMode = self::testModeReason($channel, $this->sms)) {
+                    $status = 'skipped';
+                    $error = $testMode;
+                }
             } catch (Throwable $e) {
                 $status = 'failed';
                 $error = mb_substr($e->getMessage(), 0, 500);
@@ -87,6 +92,19 @@ class ContributionNotifier
             'status' => $status,
             'error' => $error,
         ]);
+    }
+
+    /** Why a channel is not really delivering (development drivers), or null. */
+    public static function testModeReason(string $channel, SmsGateway $sms): ?string
+    {
+        if ($channel === 'email' && in_array(config('mail.default'), ['log', 'array'], true)) {
+            return 'Hali ya majaribio: MAIL_MAILER='.config('mail.default').' - barua imeandikwa kwenye kumbukumbu, haikutumwa.';
+        }
+        if ($channel === 'sms' && $sms->name() === 'log') {
+            return 'Hali ya majaribio: SMS_DRIVER=log - ujumbe umeandikwa kwenye kumbukumbu, haukutumwa.';
+        }
+
+        return null;
     }
 
     /** Converts local Tanzanian numbers (07xx / 06xx / +255) to 255XXXXXXXXX. */

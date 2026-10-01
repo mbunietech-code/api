@@ -77,7 +77,8 @@ class ContributionFlowTest extends TestCase
         $this->getJson('/api/contributions?year=2026')->assertJsonPath('meta.total', 3)->assertJsonPath('meta.sum', 30000);
 
         // Notifications ran after the response: one SMS (log driver) and one email per payment.
-        $this->assertSame(3, NotificationLog::where('channel', 'sms')->where('status', 'sent')->count());
+        // SMS_DRIVER=log in tests: attempted, but honestly reported as not delivered.
+        $this->assertSame(3, NotificationLog::where('channel', 'sms')->where('status', 'skipped')->where('error', 'like', '%SMS_DRIVER=log%')->count());
         $this->assertSame('255712345678', NotificationLog::where('channel', 'sms')->first()->recipient);
         $this->assertStringContainsString('TZS 10,000 kwa mwezi Machi 2026', NotificationLog::latest('id')->first()->message);
         $this->assertStringContainsString('Jumla ya michango yako 2026: TZS 30,000', NotificationLog::latest('id')->first()->message);

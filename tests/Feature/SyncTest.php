@@ -55,7 +55,7 @@ class SyncTest extends TestCase
         $c = Contribution::firstWhere('uuid', $contribUuid);
         $this->assertSame('ZAMZAM ISSA MUSSA', $c->teacher->full_name);
         $this->assertSame(10000, $c->amount);
-        $this->assertSame(1, NotificationLog::where('contribution_id', $c->id)->where('channel', 'sms')->where('status', 'sent')->count());
+        $this->assertSame(1, NotificationLog::where('contribution_id', $c->id)->where('channel', 'sms')->count());
 
         // Pushing the same record again (e.g. a retried sync) is idempotent and does not notify twice.
         $this->postJson('/api/sync/push', ['contributions' => [[

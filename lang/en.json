@@ -36,5 +36,8 @@
     "Umetoka kwenye mfumo.": "You have signed out.",
     "Walimu wameingizwa kikamilifu.": "Teachers imported successfully.",
     "Weka kiasi.": "Enter an amount.",
-    "Weka tarehe ya malipo.": "Enter the payment date."
+    "Weka tarehe ya malipo.": "Enter the payment date.",
+    "Hali ya majaribio: MAIL_MAILER=log - barua imeandikwa kwenye kumbukumbu, haikutumwa.": "Test mode: MAIL_MAILER=log - the email was written to the log, not sent.",
+    "Hali ya majaribio: MAIL_MAILER=array - barua imeandikwa kwenye kumbukumbu, haikutumwa.": "Test mode: MAIL_MAILER=array - the email was not sent.",
+    "Hali ya majaribio: SMS_DRIVER=log - ujumbe umeandikwa kwenye kumbukumbu, haukutumwa.": "Test mode: SMS_DRIVER=log - the message was written to the log, not sent."
 }
