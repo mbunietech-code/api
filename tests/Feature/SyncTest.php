@@ -105,6 +105,6 @@ class SyncTest extends TestCase
         $uuid = (string) Str::uuid();
         $this->postJson('/api/sync/push', ['contributions' => [[
             'uuid' => $uuid, 'teacher_uuid' => (string) Str::uuid(), 'year' => 2026, 'month' => 1, 'amount' => 10000, 'deleted' => false,
-        ]]])->assertOk()->assertJsonPath("contributions.errors.$uuid", 'Mwalimu wa mchango huu hajapatikana kwenye seva.');
+        ]]], ['Accept-Language' => 'sw'])->assertOk()->assertJsonPath("contributions.errors.$uuid", 'Mwalimu wa mchango huu hajapatikana kwenye seva.');
     }
 }
